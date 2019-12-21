@@ -16,18 +16,30 @@ struct Lamp
         this->pin = pin;
         this->status = status;
         pinMode(pin, OUTPUT);
+
+        if (status)
+            digitalWrite(pin, LOW);
+
+        else
+            digitalWrite(pin, HIGH);
     }
 
     void turnON()
     {
-        this->status = true;
-        digitalWrite(pin, LOW);
+        if (!this->status)
+        {
+            this->status = true;
+            digitalWrite(pin, LOW);
+        }
     }
 
     void turnOFF()
     {
-        this->status = false;
-        digitalWrite(pin, HIGH);
+        if (this->status)
+        {
+            this->status = false;
+            digitalWrite(pin, HIGH);
+        }
     }
 
     void toggle()
@@ -89,9 +101,6 @@ void setup()
 
     for (int i = 0; i < 3; i++)
         lamps[i] = Lamp(i + 8, false);
-
-    //pinMode(ALARM_TUTA, OUTPUT);
-
 
     greenBlinkStart = millis();
     lamps[Lamps::alarm_indicator].turnOFF();
