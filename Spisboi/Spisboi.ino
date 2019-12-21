@@ -1,10 +1,15 @@
 #define ALARM_TUTA 11
 #define CIRCUIT_LAMP 13
 
-#define GREEN_BLINK_INTERVAL 2000
+#define BLINK_INTERVAL 700
 #define STOVE_TIMER 5000
+#define CURRENT_CHECK_INTERVAL 1000
+#define CURRENT_CHECK_DURATION 50
+
+#define HEAT_TIMER 7000
 
 void triggerAlarm();
+bool isCurrentON();
 
 struct Lamp
 {
@@ -89,10 +94,15 @@ Lamp lamps[3];
 Switch switches[6];
 
 unsigned long greenBlinkStart = 0;
+unsigned long redBlinkStart = 0;
+
 unsigned long stoveTimerStart = 0;
+unsigned long heatTimerStart = 0;
+unsigned long currentCheckStart = 0;
 
 bool stoveON = false;
 bool alarmTriggered = false;
+bool heatWarning = false;
 
 void setup()
 {
@@ -108,61 +118,113 @@ void setup()
 
 void loop()
 {
-    if (stoveON)
+    if (!alarmTriggered)
     {
+        bool trigger = false;
+
+        lamps[Lamps::contactor].turnON();
+
         if (switches[Switches::motion])
         {
             stoveTimerStart = millis();
         }
 
-        if (switches[Switches::fire] || switches[Switches::heat])
+        if (stoveON && (switches[Switches::fire]))
+            trigger = true;
+
+        if (stoveON && (switches[Switches::heat]))
+        {
+            if (!heatWarning)
+            {
+                tone(ALARM_TUTA, 400, 200);
+                heatWarning = true;
+                heatTimerStart = millis();
+                redBlinkStart = millis();
+            }
+
+            if (millis() - heatTimerStart > HEAT_TIMER)
+                trigger = true;
+
+
+            if (millis() - redBlinkStart > BLINK_INTERVAL)
+            {
+                lamps[Lamps::alarm_indicator].toggle();
+                redBlinkStart += BLINK_INTERVAL;
+            }
+        }
+
+        else
+        {
+            lamps[Lamps::alarm_indicator].turnOFF();
+            heatWarning = false;
+        }
+
+        if (isCurrentON())
+        {
+            if (!stoveON)
+            {
+                stoveTimerStart = millis();
+                stoveON = true;
+            }
+
+            if (millis() - greenBlinkStart > BLINK_INTERVAL)
+            {
+                lamps[Lamps::oven_status].toggle();
+                greenBlinkStart += BLINK_INTERVAL;
+            }
+
+            if (millis() - stoveTimerStart > STOVE_TIMER)
+                trigger = true;
+        }
+
+        else
+        {
+            stoveON = false;
+            lamps[Lamps::oven_status].turnON();
+        }
+
+
+        if (trigger)
             triggerAlarm();
-
     }
 
-
-    if (switches[Switches::current1] || switches[Switches::current2] || switches[Switches::current3])
+    //if alarmTriggered
+    else
     {
-        if (!stoveON && !alarmTriggered)
+        if (millis() - currentCheckStart > CURRENT_CHECK_INTERVAL)
         {
-            stoveTimerStart = millis();
             lamps[Lamps::contactor].turnON();
-            stoveON = true;
-        }
 
-        if (millis() - stoveTimerStart > STOVE_TIMER)
-        {
-            if (!alarmTriggered)
-                triggerAlarm();
-        }
+            if (!isCurrentON())
+            {
+                lamps[Lamps::alarm_indicator].turnOFF();
+                alarmTriggered = false;
+                noTone(ALARM_TUTA);
+            }
 
-        if (millis() - greenBlinkStart > GREEN_BLINK_INTERVAL)
-        {
-            greenBlinkStart += GREEN_BLINK_INTERVAL;
-            lamps[Lamps::oven_status].toggle();
+            if (millis() - (currentCheckStart + CURRENT_CHECK_DURATION) > CURRENT_CHECK_INTERVAL)
+            {
+                lamps[Lamps::contactor].turnOFF();
+                currentCheckStart += CURRENT_CHECK_INTERVAL + CURRENT_CHECK_DURATION;
+            }
         }
     }
 
-    else
-    {
-        lamps[Lamps::contactor].turnOFF();
-        lamps[Lamps::oven_status].turnON();
-        stoveON = false;
-        alarmTriggered = false;
-    }
-
-    if (alarmTriggered)
-        lamps[Lamps::alarm_indicator].turnON();
-
-    else
-        lamps[Lamps::alarm_indicator].turnOFF();
 
 }
 
 void triggerAlarm()
 {
-    tone(ALARM_TUTA, 200, 100);
+    tone(ALARM_TUTA, 200);
     alarmTriggered = true;
     lamps[Lamps::contactor].turnOFF();
+    lamps[Lamps::oven_status].turnOFF();
+    lamps[Lamps::alarm_indicator].turnON();
     stoveON = false;
+    currentCheckStart = millis();
+}
+
+bool isCurrentON()
+{
+    return switches[Switches::current1] || switches[Switches::current2] || switches[Switches::current3];
 }
