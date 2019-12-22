@@ -1,3 +1,5 @@
+#include <avr/wdt.h>
+
 #define ALARM_TUTA 11
 #define CIRCUIT_LAMP 13
 
@@ -104,20 +106,67 @@ bool stoveON = false;
 bool alarmTriggered = false;
 bool heatWarning = false;
 
+void watchdogOn() {
+
+    // Clear the reset flag, the WDRF bit (bit 3) of MCUSR.
+    MCUSR = MCUSR & B11110111;
+
+    // Set the WDCE bit (bit 4) and the WDE bit (bit 3) 
+    // of WDTCSR. The WDCE bit must be set in order to 
+    // change WDE or the watchdog prescalers. Setting the 
+    // WDCE bit will allow updtaes to the prescalers and 
+    // WDE for 4 clock cycles then it will be reset by 
+    // hardware.
+    WDTCSR = WDTCSR | B00011000;
+
+    // Set the watchdog timeout prescaler value to 1024 K 
+    // which will yeild a time-out interval of about 8.0 s.
+    WDTCSR = B00100001;
+
+    // Enable the watchdog timer interupt.
+    WDTCSR = WDTCSR | B01000000;
+    MCUSR = MCUSR & B11110111;
+
+}
+
 void setup()
 {
+    watchdogOn();
+
     for (int i = 0; i < 6; i++)
         switches[i] = Switch(i + 2);
 
     for (int i = 0; i < 3; i++)
         lamps[i] = Lamp(i + 8, false);
 
+
+    for (int i = 0; i < 5; i++)
+    {
+        for (int j = 0; j < 3; j++)
+            lamps[j].turnON();
+
+        delay(100);
+
+        for (int j = 0; j < 3; j++)
+            lamps[j].turnOFF();
+
+        delay(50);
+    }
+
     greenBlinkStart = millis();
-    lamps[Lamps::alarm_indicator].turnOFF();
+
 }
 
 void loop()
 {
+    wdt_reset();
+
+    //Hangs after 30 days to force a reboot
+    while (millis() > 2592000000)
+    {
+
+    }
+
     if (!alarmTriggered)
     {
         bool trigger = false;
