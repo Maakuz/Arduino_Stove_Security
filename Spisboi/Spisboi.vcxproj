@@ -108,6 +108,7 @@
     </None>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Codes.h" />
     <ClInclude Include="__vm\.Spisboi.vsarduino.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

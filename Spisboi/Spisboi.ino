@@ -1,6 +1,7 @@
 #include <avr/wdt.h>
+#include "Codes.h"
 
-#define ALARM_TUTA 11
+//#define ALARM_TUTA 11
 #define CIRCUIT_LAMP 13
 
 #define BLINK_INTERVAL 700
@@ -77,23 +78,20 @@ struct Switch
 
 enum Lamps 
 {
-    contactor = 0,
-    oven_status = 1,
-    alarm_indicator = 2
+    oven_status = 0,
+    alarm_indicator = 1,
+    contactor = 2
 };
 
 enum Switches
 {
-    fire = 0,
-    heat = 1,
-    motion = 2,
-    current1 = 3,
-    current2 = 4,
-    current3 = 5
+    current1 = 0,
+    current2 = 1,
+    current3 = 2
 };
 
 Lamp lamps[3];
-Switch switches[6];
+Switch switches[3];
 
 unsigned long greenBlinkStart = 0;
 unsigned long redBlinkStart = 0;
@@ -104,7 +102,20 @@ unsigned long currentCheckStart = 0;
 
 bool stoveON = false;
 bool alarmTriggered = false;
+bool heatWarningRecieved = false;
 bool heatWarning = false;
+
+const int SWITCH_START = 5;
+const int SWITCH_AMOUNT = 3;
+
+const int LAMP_START = 2;
+const int LAMP_AMOUNT = 3;
+
+void sendMessage(int msg)
+{
+    Serial.write(4 + '0');
+    Serial.write("e");
+}
 
 void watchdogOn() {
 
@@ -126,28 +137,27 @@ void watchdogOn() {
     // Enable the watchdog timer interupt.
     WDTCSR = WDTCSR | B01000000;
     MCUSR = MCUSR & B11110111;
-
 }
 
 void setup()
 {
     watchdogOn();
 
-    for (int i = 0; i < 6; i++)
-        switches[i] = Switch(i + 2);
+    for (int i = SWITCH_START; i < SWITCH_START + SWITCH_AMOUNT; i++)
+        switches[i - SWITCH_START] = Switch(i);
 
-    for (int i = 0; i < 3; i++)
-        lamps[i] = Lamp(i + 8, false);
+    for (int i = LAMP_START; i < LAMP_START + LAMP_AMOUNT; i++)
+        lamps[i - LAMP_START] = Lamp(i, false);
 
 
     for (int i = 0; i < 5; i++)
     {
-        for (int j = 0; j < 3; j++)
+        for (int j = 0; j < LAMP_AMOUNT; j++)
             lamps[j].turnON();
 
-        delay(100);
+        delay(50);
 
-        for (int j = 0; j < 3; j++)
+        for (int j = 0; j < LAMP_AMOUNT; j++)
             lamps[j].turnOFF();
 
         delay(50);
@@ -155,6 +165,10 @@ void setup()
 
     greenBlinkStart = millis();
 
+    Serial.begin(9600);
+
+    Serial.println("Setup done");
+    sendMessage(CONTACTOR_ON);
 }
 
 void loop()
@@ -167,25 +181,57 @@ void loop()
 
     }
 
+    long codeRecieved = 0;
+    if (Serial.available())
+    {
+        String buf= "";
+        char c = ' ';
+        while (c != END_OF_MESSAGE)
+        {
+            c = Serial.read();
+
+            if (c >= '0' && c <= '9')
+                buf += c;
+        }
+
+        codeRecieved = buf.toInt();
+
+        //for debugging
+        char ibuf[12];
+        itoa(codeRecieved, ibuf, 10);
+        Serial.write(ibuf);
+        
+        Serial.write('\n');
+    }
+
     if (!alarmTriggered)
     {
         bool trigger = false;
 
         lamps[Lamps::contactor].turnON();
 
-        if (switches[Switches::motion])
+        if (codeRecieved == MOTION_DETECTED)
         {
             stoveTimerStart = millis();
         }
 
-        if (stoveON && (switches[Switches::fire]))
+        if (stoveON && codeRecieved == FIRE_DETECTED)
             trigger = true;
 
-        if (stoveON && (switches[Switches::heat]))
+        if (codeRecieved == HEAT_WARNING)
+            heatWarningRecieved = true;
+
+        if (codeRecieved == HEAT_RESOLVED)
+            heatWarningRecieved = false;
+
+        if (stoveON && heatWarningRecieved)
         {
             if (!heatWarning)
             {
+#ifdef ALARM_TUTA
                 tone(ALARM_TUTA, 400, 200);
+#endif // ALARM_TUTA
+
                 heatWarning = true;
                 heatTimerStart = millis();
                 redBlinkStart = millis();
@@ -248,7 +294,9 @@ void loop()
             {
                 lamps[Lamps::alarm_indicator].turnOFF();
                 alarmTriggered = false;
+#ifdef ALARM_TUTA
                 noTone(ALARM_TUTA);
+#endif // ALARM_TUTA
             }
 
             if (millis() - (currentCheckStart + CURRENT_CHECK_DURATION) > CURRENT_CHECK_INTERVAL)
@@ -264,7 +312,10 @@ void loop()
 
 void triggerAlarm()
 {
+#ifdef ALARM_TUTA
     tone(ALARM_TUTA, 200);
+#endif // ALARM_TUTA
+
     alarmTriggered = true;
     lamps[Lamps::contactor].turnOFF();
     lamps[Lamps::oven_status].turnOFF();
