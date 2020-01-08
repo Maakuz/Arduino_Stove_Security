@@ -114,6 +114,10 @@ bool heatWarningRecieved = false;
 bool heatWarning = false;
 bool hasConnection = true;
 
+bool responseContactorOffFromHeat = false;
+bool responseContactorOnFromHeat = false;
+bool responseStoveOffFromHeat = false;
+
 const int SWITCH_START = 5;
 const int SWITCH_AMOUNT = 3;
 
@@ -157,6 +161,7 @@ void setup()
 void loop()
 {
     wdt_reset();
+    bool trigger = false;
 
     //Hangs after 30 days to force a reboot by watchdog
     while (millis() > 2592000000)
@@ -166,29 +171,53 @@ void loop()
 
     io.clearMessages();
 
-    long codeRecieved = 0;
+    if (Serial.available())
+        io.recieveMessage();
 
+
+    if (io.readMessage() == MESSAGE_MOTION_DETECTED)
+    {
+        stoveTimerStart = millis();
+        io.respondOk();
+    }
+
+    else if (io.readMessage() == MESSAGE_FIRE_DETECTED)
+    {
+        trigger = true;
+        io.respondOk();
+    }
+
+    else if (io.readMessage() == MESSAGE_HEAT_WARNING_HIGH)
+    {
+        trigger = true;
+        io.respondOk();
+    }
+
+    else if (io.readMessage() == MESSAGE_HEAT_WARNING_LOW)
+    {
+        heatWarningRecieved = true;
+        io.respondOk();
+    }
+
+    else if (io.readMessage() == MESSAGE_HEAT_RESOLVED)
+    {
+        heatWarningRecieved = false;
+        io.respondOk();
+    }
     
     if (!alarmTriggered && hasConnection)
     {
-        bool trigger = false;
 
         lamps[Lamps::contactor].turnON();
-        
-        if (codeRecieved == MESSAGE_MOTION_DETECTED)
+
+        if (!responseContactorOnFromHeat)
         {
-            stoveTimerStart = millis();
+            io.sendMessage(MESSAGE_CONTACTOR_ON, ID_HEAT_MONITOR);
+            if (io.waitForResponse() == RESPONSE_OK)
+                responseContactorOnFromHeat = true;
         }
+        
 
-        if (stoveON && codeRecieved == MESSAGE_FIRE_DETECTED)
-            trigger = true;
-
-        if (codeRecieved == MESSAGE_HEAT_WARNING)
-            heatWarningRecieved = true;
-
-        if (codeRecieved == MESSAGE_HEAT_RESOLVED)
-            heatWarningRecieved = false;
-            
         if (stoveON && heatWarningRecieved)
         {
             if (!heatWarning)
@@ -230,7 +259,7 @@ void loop()
             {
                 io.sendMessage(MESSAGE_OVEN_ON, ID_HEAT_MONITOR);
 
-                if (io.waitForResponse(2000) == RESPONSE_OK)
+                if (io.waitForResponse() == RESPONSE_OK)
                     messageConfirmed = true;
             }
 
@@ -246,17 +275,40 @@ void loop()
 
         else
         {
+            static bool messageConfirmed = false;
+
+            if (stoveON)
+                messageConfirmed = false;
+
+            if (!messageConfirmed)
+            {
+                io.sendMessage(MESSAGE_OVEN_OFF, ID_HEAT_MONITOR);
+
+                if (io.waitForResponse() == RESPONSE_OK)
+                    messageConfirmed = true;
+            }
+
             stoveON = false;
             lamps[Lamps::oven_status].turnON();
         }
 
 
         if (trigger)
+        {
+            responseContactorOffFromHeat = false;
             triggerAlarm();
+        }
     }
 
     else if (alarmTriggered)
     {
+        if (!responseContactorOffFromHeat)
+        {
+            io.sendMessage(MESSAGE_CONTACTOR_OFF, ID_HEAT_MONITOR);
+            if (io.waitForResponse() == RESPONSE_OK)
+                responseContactorOffFromHeat = true;
+        }
+
         if (millis() - currentCheckStart > CURRENT_CHECK_INTERVAL)
         {
             lamps[Lamps::contactor].turnON();
@@ -265,6 +317,7 @@ void loop()
             {
                 lamps[Lamps::alarm_indicator].turnOFF();
                 alarmTriggered = false;
+                responseContactorOnFromHeat = false;
             }
 
             if (millis() - (currentCheckStart + CURRENT_CHECK_DURATION) > CURRENT_CHECK_INTERVAL)

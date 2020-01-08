@@ -82,8 +82,8 @@ enum Lamps
 
 enum Switches
 {
-    high = 0,
-    low = 1
+    High = 0,
+    Low = 1
 };
 
 Lamp lamps[2];
@@ -92,7 +92,15 @@ Switch switches[2];
 IO io(ID_HEAT_MONITOR, TRANSMITTOR_PIN, 50);
 
 bool stoveON = false;
-bool alarmTriggered = false;
+bool responseRecievedHighHeat = false;
+bool responseRecievedLowHeat = false;
+bool responseRecievedNoHeat = false;
+
+bool high = false;
+bool low = false;
+
+//0 is OK, 1 is lowAlarm and 2 is highAlarm
+int heatLevel = 0;
 
 const int SWITCH_START = 2;
 const int SWITCH_AMOUNT = 2;
@@ -101,6 +109,7 @@ const int LAMP_START = 4;
 const int LAMP_AMOUNT = 2;
 
 unsigned long greenBlinkStart = 0;
+unsigned long redBlinkStart = 0;
 
 
 void setup()
@@ -161,6 +170,30 @@ void loop()
         io.respondOk();
     }
 
+    else if (io.readMessage() == MESSAGE_OVEN_OFF)
+    {
+        stoveON = false;
+        lamps[Lamps::status].turnON();
+        lamps[Lamps::alarm_indicator].turnOFF();
+        io.respondOk();
+    }
+
+    else if (io.readMessage() == MESSAGE_CONTACTOR_ON)
+    {
+        noTone(ALARM_TUTA);
+        lamps[Lamps::status].turnON();
+        lamps[Lamps::alarm_indicator].turnOFF();
+        io.respondOk();
+    }
+
+    else if (io.readMessage() == MESSAGE_CONTACTOR_OFF)
+    {
+        stoveON = false;
+        lamps[Lamps::status].turnOFF();
+        lamps[Lamps::alarm_indicator].turnON();
+        io.respondOk();
+    }
+
 
     if (stoveON)
     {
@@ -170,14 +203,83 @@ void loop()
             greenBlinkStart += BLINK_INTERVAL;
         }
 
-        if (switches[Switches::low])
-            lamps[Lamps::alarm_indicator].turnON();
+        if (switches[Switches::High] && !high)
+        {
+            heatLevel = 2;
+            high = true;
+            low = false;
+            responseRecievedHighHeat = false;
+        }
+
+        else if (switches[Switches::Low] && !switches[Switches::High] && !low)
+        {
+            tone(ALARM_TUTA, 33, 1000);
+
+            heatLevel = 1;
+            low = true;
+            high = false;
+            responseRecievedLowHeat = false;
+
+            redBlinkStart = millis();
+        }
+
+        else if (!switches[Switches::Low] && !switches[Switches::High])
+        {
+            heatLevel = 0;
+            low = false;
+            high = false;
+            responseRecievedNoHeat = false;
+
+            lamps[Lamps::alarm_indicator].turnOFF();
+        }
+
+        if (heatLevel == 2)
+        {
+            tone(ALARM_TUTA, 41);
+            if (!responseRecievedHighHeat)
+            {
+                io.sendMessage(MESSAGE_HEAT_WARNING_HIGH, ID_CONTACTOR);
+
+                if (io.waitForResponse() == RESPONSE_OK)
+                    responseRecievedHighHeat = true;
+            }
+        }
+
+        else if (heatLevel == 1)
+        {
+            if (!responseRecievedLowHeat)
+            {
+                io.sendMessage(MESSAGE_HEAT_WARNING_LOW, ID_CONTACTOR);
+
+                if (io.waitForResponse() == RESPONSE_OK)
+                    responseRecievedLowHeat = true;
+            }
+
+            if (millis() - redBlinkStart > BLINK_INTERVAL)
+            {
+                lamps[Lamps::alarm_indicator].toggle();
+                redBlinkStart += BLINK_INTERVAL;
+            }
+        }
 
         else
-            lamps[Lamps::alarm_indicator].turnOFF();
+        {
+            noTone(ALARM_TUTA);
+            if (!responseRecievedNoHeat)
+            {
+                io.sendMessage(MESSAGE_HEAT_RESOLVED, ID_CONTACTOR);
+
+                if (io.waitForResponse() == RESPONSE_OK)
+                    responseRecievedNoHeat = true;
+            }
+        }
     }
 
-
+    else
+    {
+        high = false;
+        low = false;
+    }
 
 
     

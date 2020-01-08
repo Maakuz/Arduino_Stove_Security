@@ -14,7 +14,7 @@ public:
 
     //Message is in format [RECIPIENT, SENDER, MESSAGE, END]
     void sendMessage(int msg, int recipient);
-    int waitForResponse(int timeout = 5000);
+    int waitForResponse(int timeout = 1000);
 
     //Saves the message if it is adessed to m_id. To read message call "readMessage()".
     //Returns MESSAGE_STATUS_...
@@ -135,7 +135,7 @@ void IO::addToMemoryBuffer(String msg)
 }
 
 //if timeout is set to 0 it will never timeout
-int IO::waitForResponse(int timeout = 5000)
+int IO::waitForResponse(int timeout)
 {
     unsigned long start = millis();
 
