@@ -86,6 +86,7 @@ typedef void *__builtin_va_list;
 #define pgm_read_float(address_short) float()
 #define pgm_read_ptr(address_short)   short()
 
-#include "Spisboi.ino"
+#include "Contactor.ino"
+#include "HeatSensor.ino"
 #endif
 #endif

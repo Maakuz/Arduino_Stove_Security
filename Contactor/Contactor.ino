@@ -1,11 +1,17 @@
-#include <avr/wdt.h>
+#include "Builds.h"
+
+#if CONTACTOR
 #include "Codes.h"
+#include "Watchdog.h"
+#include "IO.h"
+
 
 //#define ALARM_TUTA 11
 #define CIRCUIT_LAMP 13
+#define TRANSMITTOR_PIN 8
 
 #define BLINK_INTERVAL 700
-#define STOVE_TIMER 5000
+#define STOVE_TIMER 300000
 #define CURRENT_CHECK_INTERVAL 1000
 #define CURRENT_CHECK_DURATION 50
 
@@ -93,6 +99,8 @@ enum Switches
 Lamp lamps[3];
 Switch switches[3];
 
+IO io(ID_CONTACTOR, TRANSMITTOR_PIN, 0);
+
 unsigned long greenBlinkStart = 0;
 unsigned long redBlinkStart = 0;
 
@@ -104,6 +112,7 @@ bool stoveON = false;
 bool alarmTriggered = false;
 bool heatWarningRecieved = false;
 bool heatWarning = false;
+bool hasConnection = true;
 
 const int SWITCH_START = 5;
 const int SWITCH_AMOUNT = 3;
@@ -111,44 +120,15 @@ const int SWITCH_AMOUNT = 3;
 const int LAMP_START = 2;
 const int LAMP_AMOUNT = 3;
 
-void sendMessage(int msg)
-{
-    Serial.write(4 + '0');
-    Serial.write("e");
-}
-
-void watchdogOn() {
-
-    // Clear the reset flag, the WDRF bit (bit 3) of MCUSR.
-    MCUSR = MCUSR & B11110111;
-
-    // Set the WDCE bit (bit 4) and the WDE bit (bit 3) 
-    // of WDTCSR. The WDCE bit must be set in order to 
-    // change WDE or the watchdog prescalers. Setting the 
-    // WDCE bit will allow updtaes to the prescalers and 
-    // WDE for 4 clock cycles then it will be reset by 
-    // hardware.
-    WDTCSR = WDTCSR | B00011000;
-
-    // Set the watchdog timeout prescaler value to 1024 K 
-    // which will yeild a time-out interval of about 8.0 s.
-    WDTCSR = B00100001;
-
-    // Enable the watchdog timer interupt.
-    WDTCSR = WDTCSR | B01000000;
-    MCUSR = MCUSR & B11110111;
-}
-
 void setup()
 {
     watchdogOn();
-
+    
     for (int i = SWITCH_START; i < SWITCH_START + SWITCH_AMOUNT; i++)
         switches[i - SWITCH_START] = Switch(i);
 
     for (int i = LAMP_START; i < LAMP_START + LAMP_AMOUNT; i++)
         lamps[i - LAMP_START] = Lamp(i, false);
-
 
     for (int i = 0; i < 5; i++)
     {
@@ -167,71 +147,52 @@ void setup()
 
     Serial.begin(9600);
 
-    Serial.println("Setup done");
-    sendMessage(CONTACTOR_ON);
+    io.sendMessage(MESSAGE_CONNECTION_CHECK, ID_HEAT_MONITOR);
+    int response = io.waitForResponse();
+
+    if (response == RESPONSE_ERROR || response == RESPONSE_TIMEOUT)
+        hasConnection = false;
 }
 
 void loop()
 {
     wdt_reset();
 
-    //Hangs after 30 days to force a reboot
+    //Hangs after 30 days to force a reboot by watchdog
     while (millis() > 2592000000)
     {
 
     }
 
+    io.clearMessages();
+
     long codeRecieved = 0;
-    if (Serial.available())
-    {
-        String buf= "";
-        char c = ' ';
-        while (c != END_OF_MESSAGE)
-        {
-            c = Serial.read();
 
-            if (c >= '0' && c <= '9')
-                buf += c;
-        }
-
-        codeRecieved = buf.toInt();
-
-        //for debugging
-        char ibuf[12];
-        itoa(codeRecieved, ibuf, 10);
-        Serial.write(ibuf);
-        
-        Serial.write('\n');
-    }
-
-    if (!alarmTriggered)
+    
+    if (!alarmTriggered && hasConnection)
     {
         bool trigger = false;
 
         lamps[Lamps::contactor].turnON();
-
-        if (codeRecieved == MOTION_DETECTED)
+        
+        if (codeRecieved == MESSAGE_MOTION_DETECTED)
         {
             stoveTimerStart = millis();
         }
 
-        if (stoveON && codeRecieved == FIRE_DETECTED)
+        if (stoveON && codeRecieved == MESSAGE_FIRE_DETECTED)
             trigger = true;
 
-        if (codeRecieved == HEAT_WARNING)
+        if (codeRecieved == MESSAGE_HEAT_WARNING)
             heatWarningRecieved = true;
 
-        if (codeRecieved == HEAT_RESOLVED)
+        if (codeRecieved == MESSAGE_HEAT_RESOLVED)
             heatWarningRecieved = false;
-
+            
         if (stoveON && heatWarningRecieved)
         {
             if (!heatWarning)
             {
-#ifdef ALARM_TUTA
-                tone(ALARM_TUTA, 400, 200);
-#endif // ALARM_TUTA
-
                 heatWarning = true;
                 heatTimerStart = millis();
                 redBlinkStart = millis();
@@ -256,10 +217,21 @@ void loop()
 
         if (isCurrentON())
         {
+            static bool messageConfirmed = false;
+
             if (!stoveON)
             {
                 stoveTimerStart = millis();
                 stoveON = true;
+                messageConfirmed = false;
+            }
+
+            if (!messageConfirmed)
+            {
+                io.sendMessage(MESSAGE_OVEN_ON, ID_HEAT_MONITOR);
+
+                if (io.waitForResponse(2000) == RESPONSE_OK)
+                    messageConfirmed = true;
             }
 
             if (millis() - greenBlinkStart > BLINK_INTERVAL)
@@ -283,8 +255,7 @@ void loop()
             triggerAlarm();
     }
 
-    //if alarmTriggered
-    else
+    else if (alarmTriggered)
     {
         if (millis() - currentCheckStart > CURRENT_CHECK_INTERVAL)
         {
@@ -294,9 +265,6 @@ void loop()
             {
                 lamps[Lamps::alarm_indicator].turnOFF();
                 alarmTriggered = false;
-#ifdef ALARM_TUTA
-                noTone(ALARM_TUTA);
-#endif // ALARM_TUTA
             }
 
             if (millis() - (currentCheckStart + CURRENT_CHECK_DURATION) > CURRENT_CHECK_INTERVAL)
@@ -307,15 +275,17 @@ void loop()
         }
     }
 
+    //if no connection
+    else
+    {
+        //Todo: reconnect
+    }
+
 
 }
 
 void triggerAlarm()
 {
-#ifdef ALARM_TUTA
-    tone(ALARM_TUTA, 200);
-#endif // ALARM_TUTA
-
     alarmTriggered = true;
     lamps[Lamps::contactor].turnOFF();
     lamps[Lamps::oven_status].turnOFF();
@@ -328,3 +298,4 @@ bool isCurrentON()
 {
     return switches[Switches::current1] || switches[Switches::current2] || switches[Switches::current3];
 }
+#endif

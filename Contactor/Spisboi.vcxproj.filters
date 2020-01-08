@@ -15,14 +15,13 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="Spisboi.ino" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="__vm\.Spisboi.vsarduino.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Codes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Contactor.ino">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>
